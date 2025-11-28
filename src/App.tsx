@@ -795,21 +795,21 @@ export default function OnCallCalculator() {
 
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-sm">
-                   <span className="flex items-center gap-2 text-slate-600">
+                   <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                      <div className="w-2 h-2 bg-slate-400 rounded-full"></div>
-                     Standby Fee <span className="text-xs bg-slate-100 px-1.5 rounded text-slate-500">{(rates.onCall * 100).toFixed(0)}%</span>
+                     Standby Fee <span className="text-xs bg-slate-100 dark:bg-slate-800 px-1.5 rounded text-slate-500 dark:text-slate-300">{(rates.onCall * 100).toFixed(0)}%</span>
                    </span>
                                         <span className="font-mono font-medium">{calculation.onCallFee.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
-                   <span className="flex items-center gap-2 text-slate-600">
+                   <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                      <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
                      Overtime (Normal)
                    </span>
                                         <span className="font-mono font-medium">{calculation.overtimeNormalPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
-                   <span className="flex items-center gap-2 text-slate-600">
+                   <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                      <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
                      Overtime (Holiday)
                    </span>
