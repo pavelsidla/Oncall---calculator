@@ -433,8 +433,7 @@ export default function OnCallCalculator() {
                         const isHoliday = isCzechHoliday(day);
                         const isWe = isWeekend(day);
 
-                        const baseClasses =
-                            "h-10 w-full rounded-md border text-sm flex items-center justify-center relative transition-all";
+                        const baseClasses = "h-11 w-full rounded-md border text-sm flex flex-col items-center justify-center relative transition-all";
 
                         let bgClass =
                             "bg-white text-slate-900 hover:bg-slate-100 border-gray-200 " +
@@ -487,13 +486,13 @@ export default function OnCallCalculator() {
                                 {getDate(day)}
                                 {/* LABELS */}
                                 {selection?.type === 'start' && (
-                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">Start</span>
+                                    <span className="text-[8px] font-bold uppercase leading-none mt-0.5">Start</span>
                                 )}
                                 {selection?.type === 'end' && (
-                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">End</span>
+                                    <span className="text-[8px] font-bold uppercase leading-none mt-0.5">End</span>
                                 )}
                                 {selection?.type === 'split' && (
-                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">Split</span>
+                                    <span className="text-[8px] font-bold uppercase leading-none mt-0.5">Split</span>
                                 )}
 
                                 {isHoliday && !selection && (
