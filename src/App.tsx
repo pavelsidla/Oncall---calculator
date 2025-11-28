@@ -535,7 +535,7 @@ export default function OnCallCalculator() {
 
                 <div className="max-w-6xl mx-auto mb-6 flex items-center justify-between">
                     <h1 className="text-xl font-semibold">
-                        On-Call Calculator
+                        Oncall Calc
                     </h1>
 
                     <button
