@@ -156,6 +156,26 @@ const calculateStandardMonthlyHours = (date: Date): number => {
 
 type ProfileType = 'devops' | 'other' | 'custom';
 
+interface SelectedDay {
+    date: string; // ISO string
+    type: 'full' | 'handoff'; // 'full' = Standard logic, 'handoff' = 00:00 to 09:00
+}
+
+interface AppState {
+    monthlySalary: number;
+    selectedDate: string;
+    monthlyHoursOverride: number | null;
+    profile: ProfileType;
+    customRates: {
+        onCall: number;
+        otNormal: number;
+        otHoliday: number;
+    };
+    // CHANGE THIS LINE:
+    selectedOnCallDates: SelectedDay[];
+    workLogs: WorkLog[];
+}
+
 interface AppState {
     monthlySalary: number;
     selectedDate: string; // ISO string for month selection
@@ -204,7 +224,14 @@ export default function OnCallCalculator() {
         const saved = localStorage.getItem('oncall-calc-state');
         if (saved) {
             try {
-                return JSON.parse(saved);
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed.selectedOnCallDates) && typeof parsed.selectedOnCallDates[0] === 'string') {
+                    parsed.selectedOnCallDates = parsed.selectedOnCallDates.map((d: string) => ({
+                        date: d,
+                        type: 'full'
+                    }));
+                }
+                return parsed;
             } catch (e) { console.error("Failed to load state", e); }
         }
         return {
@@ -213,7 +240,7 @@ export default function OnCallCalculator() {
             monthlyHoursOverride: null,
             profile: 'devops',
             customRates: { onCall: 0.2, otNormal: 0.5, otHoliday: 1.5 },
-            selectedOnCallDates: [],
+            selectedOnCallDates: [], // Now an empty array of SelectedDay objects
             workLogs: []
         };
     });
@@ -245,14 +272,28 @@ export default function OnCallCalculator() {
     // --- HANDLERS ---
 
     const toggleDate = (day: Date) => {
-        const iso = day.toISOString();
-        const exists = state.selectedOnCallDates.find(d => isSameDay(new Date(d), day));
+        const existingIndex = state.selectedOnCallDates.findIndex(d => isSameDay(new Date(d.date), day));
+
+        let newSelection = [...state.selectedOnCallDates];
+
+        if (existingIndex >= 0) {
+            const currentItem = newSelection[existingIndex];
+
+            if (currentItem.type === 'full') {
+                // Switch to Handoff (00:00 - 09:00)
+                newSelection[existingIndex] = { ...currentItem, type: 'handoff' };
+            } else {
+                // If it was already handoff, remove it
+                newSelection.splice(existingIndex, 1);
+            }
+        } else {
+            // Add as Full shift
+            newSelection.push({ date: day.toISOString(), type: 'full' });
+        }
 
         setState(prev => ({
             ...prev,
-            selectedOnCallDates: exists
-                ? prev.selectedOnCallDates.filter(d => !isSameDay(new Date(d), day))
-                : [...prev.selectedOnCallDates, iso]
+            selectedOnCallDates: newSelection
         }));
     };
 
@@ -293,12 +334,17 @@ export default function OnCallCalculator() {
         let totalWorkHoliday = 0;
 
         // 1. Calculate Potential Standby Hours from Schedule
-        // Logic:
-        // Mon-Fri (Non-Holiday): 17:00 to 09:00 next day = 16 hours.
-        // Sat/Sun/Holiday: 24 hours.
+        state.selectedOnCallDates.forEach(item => {
+            const date = new Date(item.date);
 
-        state.selectedOnCallDates.forEach(iso => {
-            const date = new Date(iso);
+            // NEW LOGIC: Check for Handoff
+            if (item.type === 'handoff') {
+                // Handoff is strictly 00:00 to 09:00 = 9 hours
+                totalStandbyHours += 9;
+                return; // Skip the standard logic for this day
+            }
+
+            // Standard Logic ('full')
             const isHoliday = isCzechHoliday(date);
             const isWe = isWeekend(date);
 
@@ -316,9 +362,6 @@ export default function OnCallCalculator() {
         state.workLogs.forEach(log => {
             const logDate = new Date(log.date);
             const autoHoliday = isCzechHoliday(logDate);
-            // If user clicked override, assume it's a holiday regardless of auto detection logic in this specific context?
-            // Actually prompt says: "Is holiday checkbox can override this".
-            // For simplicity: If auto-detected OR manually checked.
             const isHoliday = autoHoliday || log.isHolidayOverride;
 
             if (isHoliday) {
@@ -338,7 +381,6 @@ export default function OnCallCalculator() {
         const onCallFee = paidStandbyHours * hourlyWage * rates.onCall;
         const overtimeNormalPay = totalWorkNormal * hourlyWage * (1 + rates.otNormal);
         const overtimeHolidayPay = totalWorkHoliday * hourlyWage * (1 + rates.otHoliday);
-
         const totalExtra = onCallFee + overtimeNormalPay + overtimeHolidayPay;
 
         return {
@@ -360,39 +402,42 @@ export default function OnCallCalculator() {
             end: endOfMonth(currentDate)
         });
 
-        // Padding for start of month
-        const startDay = getDay(days[0]); // 0 = Sun, 1 = Mon...
-        // Adjust for Mon start (Mon=0 in UI grid)
+        const startDay = getDay(days[0]);
         const offset = startDay === 0 ? 6 : startDay - 1;
         const empties = Array(offset).fill(null);
-
         const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
         return (
             <div className="space-y-2">
-                {/* weekday labels */}
                 <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-gray-500 dark:text-slate-400">
                     {weekDays.map(d => <div key={d}>{d}</div>)}
                 </div>
 
-                {/* days */}
                 <div className="grid grid-cols-7 gap-1">
                     {empties.map((_, i) => <div key={`empty-${i}`} />)}
                     {days.map(day => {
-                        const isSelected = state.selectedOnCallDates.some(d => isSameDay(new Date(d), day));
+                        // FIND THE SELECTION OBJECT
+                        const selection = state.selectedOnCallDates.find(d => isSameDay(new Date(d.date), day));
+                        const isSelected = !!selection;
+
                         const isHoliday = isCzechHoliday(day);
                         const isWe = isWeekend(day);
 
                         const baseClasses =
                             "h-10 w-full rounded-md border text-sm flex items-center justify-center relative transition-all";
 
-                        // default (not selected)
+                        // default
                         let bgClass =
                             "bg-white text-slate-900 hover:bg-slate-100 border-gray-200 " +
                             "dark:bg-slate-800 dark:text-slate-50 dark:border-slate-700 dark:hover:bg-slate-700";
 
                         if (isSelected) {
-                            if (isHoliday) {
+                            if (selection.type === 'handoff') {
+                                // NEW STYLE: Handoff Day (Orange)
+                                bgClass =
+                                    "bg-orange-100 text-orange-900 border-orange-500 hover:bg-orange-200 " +
+                                    "dark:bg-orange-900/60 dark:text-orange-100 dark:border-orange-500 dark:hover:bg-orange-900";
+                            } else if (isHoliday) {
                                 // Selected holiday
                                 bgClass =
                                     "bg-purple-100 text-purple-900 border-purple-500 hover:bg-purple-200 " +
@@ -409,7 +454,6 @@ export default function OnCallCalculator() {
                                     "dark:bg-slate-50 dark:text-slate-900 dark:border-slate-50 dark:hover:bg-slate-200";
                             }
                         } else if (isHoliday) {
-                            // holiday but not selected
                             bgClass =
                                 "bg-red-50 text-red-600 border-red-100 " +
                                 "dark:bg-red-900/50 dark:text-red-200 dark:border-red-700";
@@ -422,29 +466,30 @@ export default function OnCallCalculator() {
                                 className={`${baseClasses} ${bgClass}`}
                             >
                                 {getDate(day)}
-                                {isHoliday && (
-                                    <span className="absolute top-0 right-0.5 text-[10px] leading-none text-current opacity-70">
-                                    ●
-                                </span>
+                                {selection?.type === 'handoff' && (
+                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">End</span>
+                                )}
+                                {isHoliday && !selection && (
+                                    <span className="absolute top-0 right-0.5 text-[10px] leading-none text-current opacity-70">●</span>
                                 )}
                             </button>
                         );
                     })}
                 </div>
 
-                {/* legend */}
-                <div className="flex gap-4 text-xs text-gray-500 dark:text-slate-400 mt-2 justify-center">
+                {/* Updated Legend */}
+                <div className="flex flex-wrap gap-4 text-xs text-gray-500 dark:text-slate-400 mt-2 justify-center">
                     <div className="flex items-center gap-1">
                         <div className="w-3 h-3 bg-slate-900 dark:bg-slate-50 rounded" />
-                        Normal On-Call
+                        Full Shift
                     </div>
                     <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 bg-blue-100 border border-blue-500 dark:bg-blue-900/60 dark:border-blue-500 rounded" />
-                        Weekend
+                        <div className="w-3 h-3 bg-orange-100 border border-orange-500 dark:bg-orange-900/60 rounded" />
+                        Handoff (Morning only)
                     </div>
                     <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 bg-purple-100 border border-purple-500 dark:bg-purple-900/60 dark:border-purple-500 rounded" />
-                        Holiday On-Call
+                        <div className="w-3 h-3 bg-purple-100 border border-purple-500 dark:bg-purple-900/60 rounded" />
+                        Holiday
                     </div>
                 </div>
             </div>
