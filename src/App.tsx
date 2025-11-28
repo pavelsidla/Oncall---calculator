@@ -23,7 +23,6 @@ import {
 
 // --- UI COMPONENTS ---
 
-// Fixed: Added className? to all components to prevent TS2322 errors
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
     <div
         className={
@@ -113,6 +112,7 @@ const getEasterSunday = (year: number): Date => {
     return new Date(year, month, day);
 };
 
+// Kept exactly as provided in your file
 const isCzechHoliday = (date: Date): boolean => {
     const d = getDate(date);
     const m = date.getMonth();
@@ -159,10 +159,10 @@ const calculateStandardMonthlyHours = (date: Date): number => {
 
 type ProfileType = 'devops' | 'other' | 'custom';
 
-// Fixed: Defined SelectedDay interface clearly
+// UPDATED: Added 'split' (Junior Cover), 'start', 'end' logic
 interface SelectedDay {
     date: string; // ISO string
-    type: 'full' | 'handoff';
+    type: 'full' | 'start' | 'end' | 'split';
 }
 
 interface AppState {
@@ -175,7 +175,6 @@ interface AppState {
         otNormal: number;
         otHoliday: number;
     };
-    // Fixed: Properly typed as an array of SelectedDay objects
     selectedOnCallDates: SelectedDay[];
     workLogs: WorkLog[];
 }
@@ -217,7 +216,7 @@ export default function OnCallCalculator() {
             try {
                 const parsed = JSON.parse(saved);
 
-                // DATA MIGRATION: Convert old string array to new object array
+                // DATA MIGRATION
                 if (Array.isArray(parsed.selectedOnCallDates) && parsed.selectedOnCallDates.length > 0) {
                     if (typeof parsed.selectedOnCallDates[0] === 'string') {
                         parsed.selectedOnCallDates = parsed.selectedOnCallDates.map((d: string) => ({
@@ -247,8 +246,6 @@ export default function OnCallCalculator() {
 
     const currentDate = new Date(state.selectedDate);
 
-    // Removed unused 'year' and 'month' variables to fix TS6133
-
     const standardMonthlyHours = useMemo(() =>
             calculateStandardMonthlyHours(currentDate),
         [currentDate]);
@@ -272,15 +269,18 @@ export default function OnCallCalculator() {
         if (existingIndex >= 0) {
             const currentItem = newSelection[existingIndex];
 
+            // Cycle: Full -> Start -> End -> Split -> None
             if (currentItem.type === 'full') {
-                // Switch to Handoff
-                newSelection[existingIndex] = { ...currentItem, type: 'handoff' };
+                newSelection[existingIndex] = { ...currentItem, type: 'start' };
+            } else if (currentItem.type === 'start') {
+                newSelection[existingIndex] = { ...currentItem, type: 'end' };
+            } else if (currentItem.type === 'end') {
+                newSelection[existingIndex] = { ...currentItem, type: 'split' };
             } else {
-                // Remove
                 newSelection.splice(existingIndex, 1);
             }
         } else {
-            // Add Full
+            // Default to Full
             newSelection.push({ date: day.toISOString(), type: 'full' });
         }
 
@@ -326,18 +326,42 @@ export default function OnCallCalculator() {
         let totalWorkNormal = 0;
         let totalWorkHoliday = 0;
 
-        // 1. Calculate Potential Standby Hours from Schedule
         state.selectedOnCallDates.forEach(item => {
             const date = new Date(item.date);
+            const isHoliday = isCzechHoliday(date);
+            const isWe = isWeekend(date);
 
-            if (item.type === 'handoff') {
+            // --- LOGIC UPDATES ---
+
+            // 1. Start Only (Taking over)
+            if (item.type === 'start') {
+                if (isHoliday || isWe) {
+                    // Holiday Start: 09:00 - 24:00 (15h)
+                    totalStandbyHours += 15;
+                } else {
+                    // Workday Start: 17:00 - 24:00 (7h)
+                    totalStandbyHours += 7;
+                }
+                return;
+            }
+
+            // 2. End Only (Handoff Morning)
+            if (item.type === 'end') {
+                // Always 00:00 - 09:00 (9h)
                 totalStandbyHours += 9;
                 return;
             }
 
-            const isHoliday = isCzechHoliday(date);
-            const isWe = isWeekend(date);
+            // 3. Split / Support (Junior Cover)
+            if (item.type === 'split') {
+                // Morning (9h) + Evening (7h) = 16h
+                // This covers 00:00-09:00 + 17:00-24:00
+                totalStandbyHours += 16;
+                return;
+            }
 
+            // 4. Full Shift (Standard)
+            // Existing logic for Full shifts
             if (isHoliday || isWe) {
                 totalStandbyHours += 24;
             } else {
@@ -345,7 +369,7 @@ export default function OnCallCalculator() {
             }
         });
 
-        // 2. Process Work Logs (Overtime)
+        // Work Logs processing (Overtime)
         let totalWorkDuration = 0;
 
         state.workLogs.forEach(log => {
@@ -361,10 +385,8 @@ export default function OnCallCalculator() {
             totalWorkDuration += log.hours;
         });
 
-        // 3. Adjust Standby
         const paidStandbyHours = Math.max(0, totalStandbyHours - totalWorkDuration);
 
-        // 4. Financials
         const onCallFee = paidStandbyHours * hourlyWage * rates.onCall;
         const overtimeNormalPay = totalWorkNormal * hourlyWage * (1 + rates.otNormal);
         const overtimeHolidayPay = totalWorkHoliday * hourlyWage * (1 + rates.otHoliday);
@@ -419,19 +441,33 @@ export default function OnCallCalculator() {
                             "dark:bg-slate-800 dark:text-slate-50 dark:border-slate-700 dark:hover:bg-slate-700";
 
                         if (isSelected) {
-                            if (selection?.type === 'handoff') {
+                            if (selection?.type === 'start') {
+                                // Start (Teal)
+                                bgClass =
+                                    "bg-teal-100 text-teal-900 border-teal-500 hover:bg-teal-200 " +
+                                    "dark:bg-teal-900/60 dark:text-teal-100 dark:border-teal-500 dark:hover:bg-teal-900";
+                            } else if (selection?.type === 'end') {
+                                // End (Orange)
                                 bgClass =
                                     "bg-orange-100 text-orange-900 border-orange-500 hover:bg-orange-200 " +
                                     "dark:bg-orange-900/60 dark:text-orange-100 dark:border-orange-500 dark:hover:bg-orange-900";
+                            } else if (selection?.type === 'split') {
+                                // Split (Rose/Pink)
+                                bgClass =
+                                    "bg-rose-100 text-rose-900 border-rose-500 hover:bg-rose-200 " +
+                                    "dark:bg-rose-900/60 dark:text-rose-100 dark:border-rose-500 dark:hover:bg-rose-900";
                             } else if (isHoliday) {
+                                // Full Holiday (Purple)
                                 bgClass =
                                     "bg-purple-100 text-purple-900 border-purple-500 hover:bg-purple-200 " +
                                     "dark:bg-purple-900/60 dark:text-purple-100 dark:border-purple-500 dark:hover:bg-purple-900";
                             } else if (isWe) {
+                                // Full Weekend (Blue)
                                 bgClass =
                                     "bg-blue-100 text-blue-900 border-blue-500 hover:bg-blue-200 " +
                                     "dark:bg-blue-900/60 dark:text-blue-100 dark:border-blue-500 dark:hover:bg-blue-900";
                             } else {
+                                // Full Weekday (Slate)
                                 bgClass =
                                     "bg-slate-900 text-white hover:bg-slate-800 border-slate-900 " +
                                     "dark:bg-slate-50 dark:text-slate-900 dark:border-slate-50 dark:hover:bg-slate-200";
@@ -449,9 +485,17 @@ export default function OnCallCalculator() {
                                 className={`${baseClasses} ${bgClass}`}
                             >
                                 {getDate(day)}
-                                {selection?.type === 'handoff' && (
+                                {/* LABELS */}
+                                {selection?.type === 'start' && (
+                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">Start</span>
+                                )}
+                                {selection?.type === 'end' && (
                                     <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">End</span>
                                 )}
+                                {selection?.type === 'split' && (
+                                    <span className="absolute bottom-0.5 text-[8px] font-bold uppercase">Split</span>
+                                )}
+
                                 {isHoliday && !selection && (
                                     <span className="absolute top-0 right-0.5 text-[10px] leading-none text-current opacity-70">
                                     ●
@@ -465,15 +509,19 @@ export default function OnCallCalculator() {
                 <div className="flex flex-wrap gap-4 text-xs text-gray-500 dark:text-slate-400 mt-2 justify-center">
                     <div className="flex items-center gap-1">
                         <div className="w-3 h-3 bg-slate-900 dark:bg-slate-50 rounded" />
-                        Full Shift
+                        Full
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 bg-teal-100 border border-teal-500 dark:bg-teal-900/60 rounded" />
+                        Start
                     </div>
                     <div className="flex items-center gap-1">
                         <div className="w-3 h-3 bg-orange-100 border border-orange-500 dark:bg-orange-900/60 rounded" />
-                        Handoff (Morning)
+                        End
                     </div>
                     <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 bg-purple-100 border border-purple-500 dark:bg-purple-900/60 rounded" />
-                        Holiday
+                        <div className="w-3 h-3 bg-rose-100 border border-rose-500 dark:bg-rose-900/60 rounded" />
+                        Split
                     </div>
                 </div>
             </div>
@@ -605,7 +653,11 @@ export default function OnCallCalculator() {
                             </CardHeader>
                             <CardContent>
                                 <p className="text-sm text-muted-foreground mb-4">
-                                    Click once for <strong>Full Shift</strong>. Click again for <strong>Handoff (Ends 9AM)</strong>.
+                                    Click to toggle modes:<br/>
+                                    <span className="inline-block w-2 h-2 rounded bg-slate-900 dark:bg-slate-50 mr-1"/><strong>Full</strong> (Standard)<br/>
+                                    <span className="inline-block w-2 h-2 rounded bg-teal-500 mr-1"/><strong>Start</strong> (7h Workday / 15h Holiday)<br/>
+                                    <span className="inline-block w-2 h-2 rounded bg-orange-500 mr-1"/><strong>End</strong> (9h Morning)<br/>
+                                    <span className="inline-block w-2 h-2 rounded bg-rose-500 mr-1"/><strong>Split</strong> (16h Cover + Work)
                                 </p>
                                 <div className="max-w-sm mx-auto">
                                     {renderCalendar()}
